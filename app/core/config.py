@@ -17,10 +17,11 @@ class Settings(BaseSettings):
     # postgresql://user:password@localhost:5432/ai_video_studio
     DATABASE_URL: str = "sqlite:///./app.db"
 
-    # CORS — Vite dev server origins
+    # CORS — Vite dev server origins + production frontend
     FRONTEND_ORIGINS: list[str] = [
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "https://aivideofronted.vercel.app",
     ]
 
     # AI Services
