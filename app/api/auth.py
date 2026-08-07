@@ -13,7 +13,19 @@ from app.api.deps import get_current_admin
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
-@router.get("/debug-db-temp")
+@router.get("/debug-login-temp")
+def debug_login_temp(db: Session = Depends(get_db)):
+    """TEMPORARY: tests password verification directly. Remove after use."""
+    admin = db.query(Admin).filter(Admin.email == "admin@wayneesolutions.com").first()
+    if not admin:
+        return {"found": False}
+    result = verify_password("wayne123", admin.password)
+    return {
+        "found": True,
+        "is_active": admin.is_active,
+        "stored_hash_prefix": admin.password[:10],
+        "verify_result": result,
+    }
 def debug_db_temp():
     """TEMPORARY: shows which database the app is actually connected to (masked). Remove after use."""
     from app.core.config import settings
