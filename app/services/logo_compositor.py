@@ -25,7 +25,10 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 IMAGES_DIR = Path("static/images")
-IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    logger.warning("Could not create static/images directory (read-only filesystem?)")
 
 
 def _get_openai_client() -> AsyncOpenAI:
@@ -294,7 +297,10 @@ async def composite_logo_on_image(
 
 # Google Fonts download cache
 FONTS_DIR = Path("static/fonts")
-FONTS_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    FONTS_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    logger.warning("Could not create static/fonts directory (read-only filesystem?)")
 
 GOOGLE_FONT_MAP = {
     "Dancing Script": "DancingScript-Bold",

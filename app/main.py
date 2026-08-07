@@ -24,8 +24,11 @@ logger = logging.getLogger(__name__)
 
 Base.metadata.create_all(bind=engine)
 
-# Create static directory for generated images
-os.makedirs("static/images", exist_ok=True)
+# Create static directory for generated images (skip on read-only serverless filesystems)
+try:
+    os.makedirs("static/images", exist_ok=True)
+except OSError:
+    logger.warning("Could not create static/images directory (read-only filesystem?)")
 
 app = FastAPI(
     title=settings.APP_NAME,

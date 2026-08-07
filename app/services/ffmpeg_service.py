@@ -14,10 +14,12 @@ import httpx
 logger = logging.getLogger(__name__)
 
 OUTPUT_DIR = Path("static/videos")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
 IMAGES_DIR = Path("static/images")
-IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    logger.warning("Could not create static directories (read-only filesystem?)")
 
 BRAND_NAME = "Wayne E Solutions"
 TAGLINE = "Luxury Redefined"
