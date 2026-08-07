@@ -13,6 +13,20 @@ from app.api.deps import get_current_admin
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
+@router.get("/debug-db-temp")
+def debug_db_temp():
+    """TEMPORARY: shows which database the app is actually connected to (masked). Remove after use."""
+    from app.core.config import settings
+    url = settings.DATABASE_URL
+    if "@" in url:
+        prefix, rest = url.split("://", 1)
+        creds, host_part = rest.split("@", 1)
+        masked = f"{prefix}://***:***@{host_part}"
+    else:
+        masked = url
+    return {"database_url_masked": masked}
+
+
 @router.get("/seed-admin-temp")
 def seed_admin_temp(db: Session = Depends(get_db)):
     """TEMPORARY endpoint to create the default admin. Remove after use."""
