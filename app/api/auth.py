@@ -13,6 +13,28 @@ from app.api.deps import get_current_admin
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
+@router.get("/seed-admin-temp")
+def seed_admin_temp(db: Session = Depends(get_db)):
+    """TEMPORARY endpoint to create the default admin. Remove after use."""
+    existing = db.query(Admin).filter(Admin.email == "admin@wayneesolutions.com").first()
+    if existing:
+        return {"message": "Admin already exists", "email": existing.email}
+
+    admin = Admin(
+        full_name="Wayne E Solutions Admin",
+        email="admin@wayneesolutions.com",
+        password=hash_password("wayne123"),
+        is_active=True,
+    )
+    db.add(admin)
+    db.commit()
+    return {
+        "message": "Admin created successfully",
+        "email": "admin@wayneesolutions.com",
+        "password": "wayne123",
+    }
+
+
 @router.post("/seed-admin")
 def seed_admin(db: Session = Depends(get_db)):
     """TEMPORARY: creates the first admin if none exists yet. Remove after use."""
