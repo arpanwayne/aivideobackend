@@ -51,9 +51,21 @@ app.add_middleware(
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"Unhandled error on {request.method} {request.url}: {exc}", exc_info=True)
+
+    # The Exception handler runs in Starlette's ServerErrorMiddleware, which sits
+    # OUTSIDE CORSMiddleware — so without this, 500 responses never get CORS
+    # headers and the browser blocks them, showing a generic "Network Error"
+    # instead of the real error message. Add the headers manually here.
+    origin = request.headers.get("origin")
+    headers = {}
+    if origin and origin in settings.FRONTEND_ORIGINS:
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Access-Control-Allow-Credentials"] = "true"
+
     return JSONResponse(
         status_code=500,
-        content={"detail": "Internal server error. Please try again."},
+        content={"detail": f"Internal server error: {exc}"},
+        headers=headers,
     )
 
 # ── Routers ───────────────────────────────────────────────────────────────────
