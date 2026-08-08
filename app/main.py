@@ -16,6 +16,7 @@ from app.api.jobs import router as jobs_router
 from app.api.settings import router as settings_router
 from app.core.config import settings
 from app.database.session import Base, engine
+from app.database.migrate import sync_missing_columns
 
 from app.models import admin, client, job, setting, activity, image_generation, brand_kit  # noqa: F401
 
@@ -23,6 +24,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 Base.metadata.create_all(bind=engine)
+
+try:
+    sync_missing_columns(engine, Base)
+except Exception as e:
+    logger.error(f"Auto-migration failed (continuing anyway): {e}")
 
 # Create static directory for generated images (skip on read-only serverless filesystems)
 try:
