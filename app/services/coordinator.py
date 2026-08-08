@@ -133,7 +133,7 @@ async def run_assembling(job_id: str):
             try:
                 import httpx
                 from pathlib import Path
-                logo_dir = Path("static/logos")
+                logo_dir = Path("/tmp/wayne_logos")
                 logo_dir.mkdir(parents=True, exist_ok=True)
                 logo_file = logo_dir / f"logo_{job.id[:8]}.png"
                 if not logo_file.exists():

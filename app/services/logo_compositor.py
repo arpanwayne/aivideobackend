@@ -21,14 +21,15 @@ import httpx
 from openai import AsyncOpenAI
 
 from app.core.config import settings
+from app.services.storage import upload_public
 
 logger = logging.getLogger(__name__)
 
-IMAGES_DIR = Path("static/images")
+IMAGES_DIR = Path("/tmp/wayne_images")
 try:
     IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 except OSError:
-    logger.warning("Could not create static/images directory (read-only filesystem?)")
+    logger.warning("Could not create /tmp/wayne_images directory")
 
 
 def _get_openai_client() -> AsyncOpenAI:
@@ -279,8 +280,17 @@ async def composite_logo_on_image(
     filepath = IMAGES_DIR / filename
     filepath.write_bytes(final_bytes)
 
-    final_url = f"http://127.0.0.1:8000/static/images/{filename}"
-    logger.info(f"Logo composited at {placement['position']}: {filename}")
+    final_url = await upload_public(filepath)
+    try:
+        filepath.unlink()
+    except Exception:
+        pass
+
+    if not final_url:
+        logger.error("Logo composited but upload to public storage failed — returning original")
+        return background_url
+
+    logger.info(f"Logo composited at {placement['position']}: {final_url[:60]}")
 
     # If overlay text also requested — apply it on top of the branded image
     if overlay_text:
@@ -296,11 +306,11 @@ async def composite_logo_on_image(
 
 
 # Google Fonts download cache
-FONTS_DIR = Path("static/fonts")
+FONTS_DIR = Path("/tmp/wayne_fonts")
 try:
     FONTS_DIR.mkdir(parents=True, exist_ok=True)
 except OSError:
-    logger.warning("Could not create static/fonts directory (read-only filesystem?)")
+    logger.warning("Could not create /tmp/wayne_fonts directory")
 
 GOOGLE_FONT_MAP = {
     "Dancing Script": "DancingScript-Bold",
@@ -582,6 +592,18 @@ async def add_text_overlay(
         return background_url
 
     filename = f"text_{uuid.uuid4().hex}.png"
-    (IMAGES_DIR / filename).write_bytes(final_bytes)
-    logger.info(f"Text overlay added: {filename}")
-    return f"http://127.0.0.1:8000/static/images/{filename}"
+    filepath = IMAGES_DIR / filename
+    filepath.write_bytes(final_bytes)
+
+    public_url = await upload_public(filepath)
+    try:
+        filepath.unlink()
+    except Exception:
+        pass
+
+    if not public_url:
+        logger.error("Text overlay rendered but upload to public storage failed — returning original")
+        return background_url
+
+    logger.info(f"Text overlay added: {public_url[:60]}")
+    return public_url

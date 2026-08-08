@@ -174,7 +174,7 @@ async def animate_frame(frame_url: str, motion: str, model: str) -> tuple[str, f
                 async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
                     resp = await client.get(frame_url)
                     resp.raise_for_status()
-                    tmp = Path(f"static/images/fal_{uuid.uuid4().hex}.png")
+                    tmp = Path(f"/tmp/fal_{uuid.uuid4().hex}.png")
                     tmp.write_bytes(resp.content)
                 public_url = await asyncio.get_event_loop().run_in_executor(
                     None, lambda: fal_client.upload_file(str(tmp))

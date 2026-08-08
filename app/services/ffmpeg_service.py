@@ -11,15 +11,39 @@ from pathlib import Path
 
 import httpx
 
+from app.services.storage import upload_public
+
 logger = logging.getLogger(__name__)
 
-OUTPUT_DIR = Path("static/videos")
-IMAGES_DIR = Path("static/images")
+# /tmp is the only writable directory on Vercel's serverless filesystem —
+# a relative "static/videos" path is read-only in production and every
+# write to it used to fail silently, which is why finished videos always
+# fell back to the fake stub-cdn URL.
+OUTPUT_DIR = Path("/tmp/wayne_videos")
+IMAGES_DIR = Path("/tmp/wayne_dl_images")
 try:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 except OSError:
-    logger.warning("Could not create static directories (read-only filesystem?)")
+    logger.warning("Could not create /tmp working directories")
+
+
+def _get_ffmpeg_binary() -> str:
+    """Resolve a working ffmpeg binary.
+
+    Vercel's Python runtime has no system ffmpeg install, so `ffmpeg` on
+    PATH doesn't exist there. imageio-ffmpeg ships a static, self-contained
+    ffmpeg binary as part of the pip package (works on Vercel's Linux
+    functions with zero setup) — we use that everywhere, and only fall back
+    to a bare "ffmpeg" call (useful for local dev boxes that do have it on
+    PATH) if the package isn't installed for some reason.
+    """
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception as e:
+        logger.warning(f"imageio-ffmpeg unavailable ({e}), falling back to system ffmpeg")
+        return "ffmpeg"
 
 BRAND_NAME = "Wayne E Solutions"
 TAGLINE = "Luxury Redefined"
@@ -44,7 +68,7 @@ def _get_font_path() -> str:
 
 
 def _run_ffmpeg(args: list[str]) -> bool:
-    cmd = ["ffmpeg", "-y"] + args
+    cmd = [_get_ffmpeg_binary(), "-y"] + args
     logger.info(f"Running FFmpeg: {' '.join(cmd[:6])}...")
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
@@ -170,8 +194,15 @@ async def motion_still(
         pass
 
     if success and output_path.exists():
-        logger.info(f"motion_still complete: {output_path.name}")
-        return f"http://127.0.0.1:8000/static/videos/{output_path.name}", 0.0
+        public_url = await upload_public(output_path)
+        try:
+            output_path.unlink()
+        except Exception:
+            pass
+        if public_url:
+            logger.info(f"motion_still complete: {public_url[:60]}")
+            return public_url, 0.0
+        logger.error("motion_still rendered but upload to public storage failed")
 
     # Fallback without text
     logger.warning("Retrying without text overlay")
@@ -197,8 +228,15 @@ async def motion_still(
         except Exception:
             pass
         if success2 and output_path2.exists():
-            logger.info(f"motion_still (no text) complete: {output_path2.name}")
-            return f"http://127.0.0.1:8000/static/videos/{output_path2.name}", 0.0
+            public_url = await upload_public(output_path2)
+            try:
+                output_path2.unlink()
+            except Exception:
+                pass
+            if public_url:
+                logger.info(f"motion_still (no text) complete: {public_url[:60]}")
+                return public_url, 0.0
+            logger.error("motion_still (no text) rendered but upload to public storage failed")
 
     clip_id = str(uuid.uuid4())[:8]
     return f"https://stub-cdn.wayneesolutions.com/motion/{clip_id}.mp4", 0.0
@@ -211,29 +249,24 @@ async def stitch_and_brand(clip_urls: list[str], brand_kit: dict) -> str:
 
     import httpx
 
-    # Download all clips to local files (handles both local and fal.ai URLs)
+    # Download all clips (every clip URL is now a real external URL — either
+    # straight from fal.ai's video models, or from our own upload_public()
+    # call after motion_still renders — so there's no local-file case left).
     local_clips = []
     for url in clip_urls:
         if not url or "stub-cdn" in url:
             continue
-        if "127.0.0.1" in url:
-            clip_file = url.replace("http://127.0.0.1:8000/static/videos/", "")
-            clip_path = OUTPUT_DIR / clip_file
-            if clip_path.exists():
-                local_clips.append(str(clip_path.absolute()))
-        else:
-            # External URL (fal.ai) — download first
-            try:
-                logger.info(f"Downloading fal.ai clip: {url[:60]}")
-                async with httpx.AsyncClient(timeout=120, follow_redirects=True) as client:
-                    resp = await client.get(url)
-                    resp.raise_for_status()
-                    tmp_path = OUTPUT_DIR / f"clip_{uuid.uuid4().hex}.mp4"
-                    tmp_path.write_bytes(resp.content)
-                    local_clips.append(str(tmp_path.absolute()))
-                    logger.info(f"Downloaded: {tmp_path.name} ({len(resp.content)//1024}KB)")
-            except Exception as e:
-                logger.error(f"Failed to download clip {url}: {e}")
+        try:
+            logger.info(f"Downloading clip: {url[:60]}")
+            async with httpx.AsyncClient(timeout=120, follow_redirects=True) as client:
+                resp = await client.get(url)
+                resp.raise_for_status()
+                tmp_path = OUTPUT_DIR / f"clip_{uuid.uuid4().hex}.mp4"
+                tmp_path.write_bytes(resp.content)
+                local_clips.append(str(tmp_path.absolute()))
+                logger.info(f"Downloaded: {tmp_path.name} ({len(resp.content)//1024}KB)")
+        except Exception as e:
+            logger.error(f"Failed to download clip {url}: {e}")
 
     if not local_clips:
         video_id = str(uuid.uuid4())[:8]
@@ -265,8 +298,11 @@ async def stitch_and_brand(clip_urls: list[str], brand_kit: dict) -> str:
             pass
 
     if success and output_path.exists():
-        logger.info(f"stitch complete: {output_path.name}")
-        return f"http://127.0.0.1:8000/static/videos/{output_path.name}"
+        public_url = await upload_public(output_path)
+        if public_url:
+            logger.info(f"stitch complete: {public_url[:60]}")
+            return public_url
+        logger.error("stitch rendered but upload to public storage failed")
 
     video_id = str(uuid.uuid4())[:8]
     return f"https://stub-cdn.wayneesolutions.com/assembled/{video_id}.mp4"
@@ -281,23 +317,23 @@ async def export_ratios(video_url: str, logo_path: str | None = None, overlay_te
             "16:9": f"https://stub-cdn.wayneesolutions.com/final/{vid_id}_169.mp4",
         }
 
-    filename = video_url.split("/")[-1]
-    input_path = OUTPUT_DIR / filename
-
-    logger.info(f"export_ratios looking for: {input_path} (exists: {input_path.exists()})")
-
-    if not input_path.exists():
-        matches = list(OUTPUT_DIR.glob(f"*{filename}*"))
-        if matches:
-            input_path = matches[0]
-        else:
-            logger.error(f"Could not find: {filename}")
-            vid_id = str(uuid.uuid4())[:8]
-            return {
-                "9:16": f"https://stub-cdn.wayneesolutions.com/final/{vid_id}_916.mp4",
-                "1:1": f"https://stub-cdn.wayneesolutions.com/final/{vid_id}_11.mp4",
-                "16:9": f"https://stub-cdn.wayneesolutions.com/final/{vid_id}_169.mp4",
-            }
+    # video_url is now always a real external URL (fal.ai storage, or
+    # straight from a fal.ai video model) — download it locally first so
+    # FFmpeg has a file to work with.
+    input_path = OUTPUT_DIR / f"source_{uuid.uuid4().hex}.mp4"
+    try:
+        async with httpx.AsyncClient(timeout=120, follow_redirects=True) as client:
+            resp = await client.get(video_url)
+            resp.raise_for_status()
+            input_path.write_bytes(resp.content)
+    except Exception as e:
+        logger.error(f"export_ratios: could not download source video {video_url[:60]}: {e}")
+        vid_id = str(uuid.uuid4())[:8]
+        return {
+            "9:16": f"https://stub-cdn.wayneesolutions.com/final/{vid_id}_916.mp4",
+            "1:1": f"https://stub-cdn.wayneesolutions.com/final/{vid_id}_11.mp4",
+            "16:9": f"https://stub-cdn.wayneesolutions.com/final/{vid_id}_169.mp4",
+        }
 
     ratios = {
         "9:16": ("1080", "1920", f"export_{uuid.uuid4().hex}_916.mp4"),
@@ -363,11 +399,26 @@ async def export_ratios(video_url: str, logo_path: str | None = None, overlay_te
             ])
 
         if success and output_path.exists():
-            result[ratio] = f"http://127.0.0.1:8000/static/videos/{out_filename}"
-            logger.info(f"export_ratios {ratio} complete: {out_filename}")
+            public_url = await upload_public(output_path)
+            try:
+                output_path.unlink()
+            except Exception:
+                pass
+            if public_url:
+                result[ratio] = public_url
+                logger.info(f"export_ratios {ratio} complete: {public_url[:60]}")
+            else:
+                vid_id = str(uuid.uuid4())[:8]
+                result[ratio] = f"https://stub-cdn.wayneesolutions.com/final/{vid_id}.mp4"
+                logger.error(f"export_ratios {ratio} rendered but upload to public storage failed")
         else:
             vid_id = str(uuid.uuid4())[:8]
             result[ratio] = f"https://stub-cdn.wayneesolutions.com/final/{vid_id}.mp4"
+
+    try:
+        input_path.unlink()
+    except Exception:
+        pass
 
     logger.info(f"export_ratios complete: {list(result.keys())}")
     return result
